@@ -1,0 +1,729 @@
+import React, { useState, useEffect } from "react";
+import {
+  Users,
+  Clock,
+  Plus,
+  Minus,
+  AlertTriangle,
+  CheckCircle,
+} from "lucide-react";
+
+const FotballApp = () => {
+  // Grunnleggende tilstander
+  const [currentView, setCurrentView] = useState("welcome");
+  const [players, setPlayers] = useState([]);
+  const [teamName, setTeamName] = useState("");
+  const [ageGroup, setAgeGroup] = useState("G11/J11");
+  const [matchTime, setMatchTime] = useState(0);
+  const [isRunning, setIsRunning] = useState(false);
+  const [selectedPlayers, setSelectedPlayers] = useState([]);
+  const [activePlayers, setActivePlayers] = useState([]);
+  const [benchPlayers, setBenchPlayers] = useState([]);
+  const [homeScore, setHomeScore] = useState(0);
+  const [awayScore, setAwayScore] = useState(0);
+  const [extraPlayerAllowed, setExtraPlayerAllowed] = useState(false);
+  const [showExtraPlayerMessage, setShowExtraPlayerMessage] = useState(false);
+  const [showRemovePlayerMessage, setShowRemovePlayerMessage] = useState(false);
+
+  // Aldersgrupper informasjon
+  const ageGroups = {
+    "G6/J6": { players: 3, time: "2x20 min", totalMinutes: 40 },
+    "G7/J7": { players: 3, time: "2x20 min", totalMinutes: 40 },
+    "G8/J8": { players: 5, time: "2x25 min", totalMinutes: 50 },
+    "G9/J9": { players: 5, time: "2x25 min", totalMinutes: 50 },
+    "G10/J10": { players: 7, time: "2x30 min", totalMinutes: 60 },
+    "G11/J11": { players: 7, time: "2x30 min", totalMinutes: 60 },
+    "G12/J12": { players: 9, time: "2x35 min", totalMinutes: 70 },
+  };
+
+  // Helt ny tiln√¶rming til spillertid
+  // Vi bruker et objekt for √• holde styr p√• hver spillers tid p√• banen
+  const [playerTimers, setPlayerTimers] = useState({});
+
+  // Timer for kampklokken
+  useEffect(() => {
+    let interval = null;
+
+    if (isRunning) {
+      interval = setInterval(() => {
+        // √òk kampklokken
+        setMatchTime((prevTime) => prevTime + 1);
+
+        // √òk tiden BARE for spillere som er p√• banen
+        setPlayerTimers((prevTimers) => {
+          const newTimers = { ...prevTimers };
+
+          // Oppdater timeren for hver aktiv spiller
+          activePlayers.forEach((player) => {
+            if (player && player.id) {
+              if (!newTimers[player.id]) {
+                newTimers[player.id] = 0;
+              }
+              newTimers[player.id] += 1;
+            }
+          });
+
+          return newTimers;
+        });
+      }, 1000);
+    }
+
+    return () => {
+      if (interval) {
+        clearInterval(interval);
+      }
+    };
+  }, [isRunning, activePlayers]);
+
+  // Sjekk m√•lforskjell og administrer ekstraspiller
+  useEffect(() => {
+    const scoreDiff = Math.abs(homeScore - awayScore);
+    const wasAllowed = extraPlayerAllowed;
+    const nowAllowed = scoreDiff >= 4;
+
+    if (nowAllowed !== wasAllowed) {
+      setExtraPlayerAllowed(nowAllowed);
+
+      if (nowAllowed && !wasAllowed) {
+        // Viser melding om at ekstraspiller kan legges til
+        setShowExtraPlayerMessage(true);
+        setTimeout(() => setShowExtraPlayerMessage(false), 5000);
+
+        // Automatisk legg til ekstraspiller hvis det er noen p√• benken
+        if (benchPlayers.length > 0) {
+          addExtraPlayer();
+        }
+      } else if (!nowAllowed && wasAllowed) {
+        // Viser melding om at en spiller m√• fjernes
+        setShowRemovePlayerMessage(true);
+        setTimeout(() => setShowRemovePlayerMessage(false), 5000);
+
+        // Automatisk fjern ekstraspiller hvis det er for mange p√• banen
+        const maxPlayers = ageGroups[ageGroup]?.players || 7;
+        if (activePlayers.length > maxPlayers) {
+          removeExtraPlayer();
+        }
+      }
+    }
+  }, [homeScore, awayScore]);
+
+  const formatTime = (seconds) => {
+    if (seconds === undefined || seconds === null) return "00:00";
+    const mins = Math.floor(seconds / 60);
+    const secs = seconds % 60;
+    return `${mins.toString().padStart(2, "0")}:${secs
+      .toString()
+      .padStart(2, "0")}`;
+  };
+
+  const calculatePlayTimePercentage = (playerId) => {
+    if (matchTime === 0) return 0;
+    const playerTime = playerTimers[playerId] || 0;
+    return Math.round((playerTime / matchTime) * 100);
+  };
+
+  const addPlayer = (name) => {
+    if (name && name.trim()) {
+      const newPlayer = {
+        id: Date.now(),
+        name: name.trim(),
+        number: players.length + 1,
+      };
+      setPlayers([...players, newPlayer]);
+    }
+  };
+
+  const selectPlayer = (player) => {
+    setSelectedPlayers([...selectedPlayers, player]);
+  };
+
+  const removeSelectedPlayer = (id) => {
+    setSelectedPlayers(selectedPlayers.filter((player) => player.id !== id));
+  };
+
+  const startMatch = () => {
+    const maxPlayers = ageGroups[ageGroup]?.players || 7;
+    const starting = selectedPlayers.slice(0, maxPlayers);
+    const bench = selectedPlayers.slice(maxPlayers);
+
+    setActivePlayers(starting);
+    setBenchPlayers(bench);
+
+    // Initialiser spillertimere
+    const timers = {};
+    selectedPlayers.forEach((player) => {
+      timers[player.id] = 0;
+    });
+    setPlayerTimers(timers);
+
+    setCurrentView("match");
+  };
+
+  const substitutePlayer = (outId, inId) => {
+    if (!outId || !inId) return;
+
+    const outPlayer = activePlayers.find((p) => p.id === outId);
+    const inPlayer = benchPlayers.find((p) => p.id === inId);
+
+    if (!outPlayer || !inPlayer) return;
+
+    // Bytt spillere
+    setActivePlayers((prevActive) =>
+      prevActive.map((p) => (p.id === outId ? inPlayer : p))
+    );
+
+    setBenchPlayers((prevBench) =>
+      prevBench.map((p) => (p.id === inId ? outPlayer : p))
+    );
+  };
+
+  const addExtraPlayer = () => {
+    if (benchPlayers.length > 0) {
+      const playerToAdd = benchPlayers[0];
+      setActivePlayers((prev) => [...prev, playerToAdd]);
+      setBenchPlayers((prev) => prev.slice(1));
+    }
+  };
+
+  const removeExtraPlayer = () => {
+    if (activePlayers.length > 0) {
+      // Fjern siste spiller som ble lagt til
+      const playerToRemove = activePlayers[activePlayers.length - 1];
+      setActivePlayers((prev) => prev.slice(0, -1));
+      setBenchPlayers((prev) => [playerToRemove, ...prev]);
+    }
+  };
+
+  const startTimer = () => {
+    setIsRunning(true);
+  };
+
+  const stopTimer = () => {
+    setIsRunning(false);
+  };
+
+  const resetMatch = () => {
+    stopTimer();
+    setMatchTime(0);
+    setHomeScore(0);
+    setAwayScore(0);
+    setActivePlayers([]);
+    setBenchPlayers([]);
+    setPlayerTimers({});
+    setExtraPlayerAllowed(false);
+    setShowExtraPlayerMessage(false);
+    setShowRemovePlayerMessage(false);
+    setCurrentView("setup");
+  };
+
+  // Velkommen-visning
+  if (currentView === "welcome") {
+    return (
+      <div className="min-h-screen bg-green-50 p-4 flex items-center justify-center">
+        <div className="max-w-md w-full bg-white rounded-lg shadow-lg p-8 text-center">
+          <h1 className="text-3xl font-bold text-green-800 mb-4">
+            Fotball Spilletid
+          </h1>
+          <p className="text-gray-600 mb-8">
+            Et verkt√∏y for √• administrere spilletid i barneidretten. S√∏rg for
+            at alle f√•r spille like mye!
+          </p>
+          <button
+            onClick={() => setCurrentView("setup")}
+            className="px-6 py-3 bg-green-600 text-white rounded-lg hover:bg-green-700 font-semibold"
+          >
+            Kom i gang
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  // Oppsett-visning
+  if (currentView === "setup") {
+    const maxPlayers = ageGroups[ageGroup]?.players || 7;
+    const canStartMatch = selectedPlayers.length >= maxPlayers;
+
+    return (
+      <div className="min-h-screen bg-green-50 p-4">
+        <div className="max-w-md mx-auto bg-white rounded-lg shadow-lg p-6">
+          <h1 className="text-2xl font-bold text-green-800 mb-6 text-center">
+            Oppsett
+          </h1>
+
+          <div className="mb-6">
+            <label className="block text-sm font-medium text-gray-700 mb-2">
+              Lagnavn
+            </label>
+            <input
+              type="text"
+              value={teamName}
+              onChange={(e) => setTeamName(e.target.value)}
+              placeholder="Ditt lag"
+              className="w-full p-2 border border-gray-300 rounded-md"
+            />
+          </div>
+
+          <div className="mb-6">
+            <label className="block text-sm font-medium text-gray-700 mb-2">
+              Aldersklasse
+            </label>
+            <select
+              value={ageGroup}
+              onChange={(e) => setAgeGroup(e.target.value)}
+              className="w-full p-2 border border-gray-300 rounded-md"
+            >
+              <option value="G6/J6">G6/J6 - 3v3 - 2x20 min</option>
+              <option value="G7/J7">G7/J7 - 3v3 - 2x20 min</option>
+              <option value="G8/J8">G8/J8 - 5v5 - 2x25 min</option>
+              <option value="G9/J9">G9/J9 - 5v5 - 2x25 min</option>
+              <option value="G10/J10">G10/J10 - 7v7 - 2x30 min</option>
+              <option value="G11/J11">G11/J11 - 7v7 - 2x30 min</option>
+              <option value="G12/J12">G12/J12 - 9v9 - 2x35 min</option>
+            </select>
+          </div>
+
+          <div className="mb-6">
+            <h2 className="text-lg font-semibold mb-3">Legg til spillere</h2>
+            <div className="flex gap-2 mb-3">
+              <input
+                type="text"
+                placeholder="Spillernavn"
+                className="flex-1 p-2 border border-gray-300 rounded-md"
+                id="player-name-input"
+                onKeyPress={(e) => {
+                  if (e.key === "Enter") {
+                    const input = document.getElementById("player-name-input");
+                    if (input) {
+                      addPlayer(input.value);
+                      input.value = "";
+                    }
+                  }
+                }}
+              />
+              <button
+                onClick={() => {
+                  const input = document.getElementById("player-name-input");
+                  if (input) {
+                    addPlayer(input.value);
+                    input.value = "";
+                  }
+                }}
+                className="px-4 py-2 bg-green-600 text-white rounded-md hover:bg-green-700"
+              >
+                <Plus size={20} />
+              </button>
+            </div>
+
+            <div className="mb-4">
+              <h3 className="font-semibold mb-2">Tilgjengelige spillere:</h3>
+              <div className="space-y-2 max-h-32 overflow-y-auto">
+                {players
+                  .filter((p) => !selectedPlayers.some((sp) => sp.id === p.id))
+                  .map((player) => (
+                    <div
+                      key={player.id}
+                      className="flex items-center justify-between p-2 bg-gray-50 rounded"
+                    >
+                      <span>
+                        #{player.number} {player.name}
+                      </span>
+                      <button
+                        onClick={() => selectPlayer(player)}
+                        className="px-3 py-1 bg-green-600 text-white rounded text-sm hover:bg-green-700"
+                      >
+                        Velg
+                      </button>
+                    </div>
+                  ))}
+              </div>
+            </div>
+
+            <div className="mb-4">
+              <h3 className="font-semibold mb-2">
+                Valgte spillere: ({selectedPlayers.length})
+              </h3>
+              <div className="space-y-2 max-h-32 overflow-y-auto">
+                {selectedPlayers.map((player) => (
+                  <div
+                    key={player.id}
+                    className="flex items-center justify-between p-2 bg-blue-50 rounded"
+                  >
+                    <span>
+                      #{player.number} {player.name}
+                    </span>
+                    <button
+                      onClick={() => removeSelectedPlayer(player.id)}
+                      className="px-3 py-1 bg-red-600 text-white rounded text-sm hover:bg-red-700"
+                    >
+                      Fjern
+                    </button>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+
+          {canStartMatch ? (
+            <button
+              onClick={startMatch}
+              className="w-full py-3 bg-blue-600 text-white rounded-md hover:bg-blue-700 font-semibold"
+            >
+              Start kamp
+            </button>
+          ) : (
+            <div className="p-3 bg-yellow-100 border border-yellow-300 rounded-lg text-center">
+              <p className="text-sm text-yellow-800">
+                Du m√• velge minst {maxPlayers} spillere for √• starte kampen.
+              </p>
+              <p className="text-sm text-yellow-800 font-bold mt-1">
+                Mangler {maxPlayers - selectedPlayers.length} spillere.
+              </p>
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  }
+
+  // Kamp-visning
+  if (currentView === "match") {
+    const maxPlayers = ageGroups[ageGroup]?.players || 7;
+
+    return (
+      <div className="min-h-screen bg-green-50 p-4">
+        <div className="max-w-md mx-auto bg-white rounded-lg shadow-lg p-6">
+          <div className="flex justify-between mb-4">
+            <button
+              onClick={() => setCurrentView("setup")}
+              className="px-3 py-1 rounded-md bg-green-600 hover:bg-green-700 text-white"
+            >
+              Oppsett
+            </button>
+            <button
+              onClick={() => setCurrentView("statistics")}
+              className="px-3 py-1 rounded-md bg-blue-600 hover:bg-blue-700 text-white"
+            >
+              Statistikk
+            </button>
+          </div>
+
+          <div className="text-center mb-6">
+            <h1 className="text-2xl font-bold text-green-800 mb-2">
+              Live Kamp
+            </h1>
+            <div className="text-lg font-medium">{teamName || "Mitt lag"}</div>
+            <div className="text-3xl font-bold text-blue-600 mb-1">
+              {formatTime(matchTime)}
+            </div>
+            <div className="text-sm text-gray-500">
+              {ageGroups[ageGroup]?.time || "2x30 min"}
+            </div>
+          </div>
+
+          {/* Timer kontroller */}
+          <div className="flex justify-center gap-4 mb-6">
+            <button
+              onClick={isRunning ? stopTimer : startTimer}
+              className={`px-6 py-2 rounded-md text-white font-semibold ${
+                isRunning
+                  ? "bg-yellow-600 hover:bg-yellow-700"
+                  : "bg-green-600 hover:bg-green-700"
+              }`}
+            >
+              {isRunning ? "Pause" : "Start"}
+            </button>
+            <button
+              onClick={() => {
+                stopTimer();
+                setMatchTime(0);
+                // Reset player timers too
+                const timers = {};
+                selectedPlayers.forEach((player) => {
+                  timers[player.id] = 0;
+                });
+                setPlayerTimers(timers);
+              }}
+              className="px-6 py-2 bg-red-600 text-white rounded-md hover:bg-red-700 font-semibold"
+            >
+              Reset
+            </button>
+          </div>
+
+          {/* M√•l */}
+          <div className="flex justify-center items-center gap-4 mb-6 p-4 bg-gray-50 rounded-lg">
+            <div className="text-center">
+              <div>Hjemme</div>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => setHomeScore(Math.max(0, homeScore - 1))}
+                  className="px-2 py-1 bg-red-500 text-white rounded"
+                >
+                  <Minus size={16} />
+                </button>
+                <span className="text-2xl font-bold w-8">{homeScore}</span>
+                <button
+                  onClick={() => setHomeScore(homeScore + 1)}
+                  className="px-2 py-1 bg-green-500 text-white rounded"
+                >
+                  <Plus size={16} />
+                </button>
+              </div>
+            </div>
+            <div className="text-2xl font-bold">-</div>
+            <div className="text-center">
+              <div>Borte</div>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => setAwayScore(Math.max(0, awayScore - 1))}
+                  className="px-2 py-1 bg-red-500 text-white rounded"
+                >
+                  <Minus size={16} />
+                </button>
+                <span className="text-2xl font-bold w-8">{awayScore}</span>
+                <button
+                  onClick={() => setAwayScore(awayScore + 1)}
+                  className="px-2 py-1 bg-green-500 text-white rounded"
+                >
+                  <Plus size={16} />
+                </button>
+              </div>
+            </div>
+          </div>
+
+          {/* Ekstraspiller varsler */}
+          {showExtraPlayerMessage && (
+            <div className="mb-4 p-3 bg-green-100 border border-green-300 rounded-lg">
+              <div className="flex items-center gap-2">
+                <CheckCircle size={18} className="text-green-700" />
+                <p className="text-sm text-green-800 font-medium">
+                  4+ m√•l forskjell! En ekstra spiller er lagt til.
+                </p>
+              </div>
+            </div>
+          )}
+
+          {showRemovePlayerMessage && (
+            <div className="mb-4 p-3 bg-orange-100 border border-orange-300 rounded-lg">
+              <div className="flex items-center gap-2">
+                <AlertTriangle size={18} className="text-orange-700" />
+                <p className="text-sm text-orange-800 font-medium">
+                  Mindre enn 4 m√•l forskjell! En spiller er tatt av banen.
+                </p>
+              </div>
+            </div>
+          )}
+
+          {/* Status informasjon */}
+          <div className="mb-4 p-3 bg-blue-50 border border-blue-200 rounded-lg">
+            <p className="text-sm text-blue-800">
+              <span className="font-medium">Status:</span>{" "}
+              {isRunning ? "Tiden l√∏per" : "Pause"}
+              <span className="ml-2 text-xs text-blue-600">
+                (Spillertid telles kun n√•r spilleren er p√• banen)
+              </span>
+            </p>
+          </div>
+
+          {/* Spillere p√• banen */}
+          <div className="mb-6">
+            <h3 className="font-semibold mb-2 flex items-center gap-2">
+              <Users size={18} />
+              P√• banen ({activePlayers.length}/{maxPlayers}
+              {extraPlayerAllowed ? "+1" : ""})
+            </h3>
+            <div className="space-y-2">
+              {activePlayers.map((player) => {
+                const playerTime = playerTimers[player.id] || 0;
+                const percentage = calculatePlayTimePercentage(player.id);
+
+                return (
+                  <div
+                    key={player.id}
+                    className="flex items-center justify-between p-3 bg-green-100 rounded-lg"
+                  >
+                    <div>
+                      <div className="font-medium">
+                        #{player.number} {player.name}
+                      </div>
+                      <div className="text-sm text-gray-600 flex items-center gap-1">
+                        <Clock size={14} />
+                        {formatTime(playerTime)}
+                        <span className="ml-1 text-xs">({percentage}%)</span>
+                      </div>
+                    </div>
+                    {benchPlayers.length > 0 && (
+                      <select
+                        onChange={(e) => {
+                          const benchPlayerId = parseInt(e.target.value);
+                          if (benchPlayerId) {
+                            substitutePlayer(player.id, benchPlayerId);
+                            e.target.value = "";
+                          }
+                        }}
+                        className="text-sm p-1 border border-gray-300 rounded"
+                        value=""
+                      >
+                        <option value="">Bytt med</option>
+                        {benchPlayers.map((benchPlayer) => (
+                          <option key={benchPlayer.id} value={benchPlayer.id}>
+                            {benchPlayer.name}
+                          </option>
+                        ))}
+                      </select>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* Spillere p√• benken */}
+          <div className="mb-6">
+            <h3 className="font-semibold mb-2">
+              Benken ({benchPlayers.length})
+            </h3>
+            <div className="space-y-2 max-h-40 overflow-y-auto">
+              {benchPlayers.map((player) => {
+                const playerTime = playerTimers[player.id] || 0;
+                const percentage = calculatePlayTimePercentage(player.id);
+
+                return (
+                  <div
+                    key={player.id}
+                    className="flex items-center justify-between p-2 bg-gray-100 rounded"
+                  >
+                    <div>
+                      <div className="font-medium">
+                        #{player.number} {player.name}
+                      </div>
+                      <div className="text-sm text-gray-600 flex items-center gap-1">
+                        <Clock size={14} />
+                        {formatTime(playerTime)}
+                        <span className="ml-1 text-xs">({percentage}%)</span>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+
+          <button
+            onClick={resetMatch}
+            className="w-full py-2 bg-gray-600 text-white rounded-md hover:bg-gray-700"
+          >
+            Avslutt kamp
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  // Statistikk-visning
+  if (currentView === "statistics") {
+    // Sorter spillere etter spilletid
+    const sortedPlayers = [...selectedPlayers].sort((a, b) => {
+      const timeA = playerTimers[a.id] || 0;
+      const timeB = playerTimers[b.id] || 0;
+      return timeB - timeA;
+    });
+
+    // Beregn total mulig spilletid basert p√• aldersgruppe
+    const totalPossibleSeconds = (ageGroups[ageGroup]?.totalMinutes || 60) * 60;
+
+    return (
+      <div className="min-h-screen bg-green-50 p-4">
+        <div className="max-w-md mx-auto bg-white rounded-lg shadow-lg p-6">
+          <div className="flex justify-between mb-4">
+            <button
+              onClick={() => setCurrentView("setup")}
+              className="px-3 py-1 rounded-md bg-green-600 hover:bg-green-700 text-white"
+            >
+              Oppsett
+            </button>
+            <button
+              onClick={() => setCurrentView("match")}
+              className="px-3 py-1 rounded-md bg-blue-600 hover:bg-blue-700 text-white"
+            >
+              Tilbake til kamp
+            </button>
+          </div>
+
+          <h1 className="text-2xl font-bold text-green-800 mb-6 text-center">
+            Spilletidsstatistikk
+          </h1>
+
+          <div className="p-3 bg-blue-50 rounded-lg mb-3">
+            <div className="text-sm font-medium text-gray-700">
+              {teamName || "Mitt lag"} | Resultat: {homeScore}-{awayScore}
+            </div>
+            <div className="text-sm text-gray-600">
+              {ageGroups[ageGroup]?.time || "2x30 min"} | Total tid:{" "}
+              {formatTime(matchTime)}
+            </div>
+          </div>
+
+          <div className="space-y-2 max-h-96 overflow-y-auto">
+            {sortedPlayers.map((player) => {
+              const playerTime = playerTimers[player.id] || 0;
+              const percentage = calculatePlayTimePercentage(player.id);
+              // Beregn ogs√• hvor mye av hele kampen (ikke bare den tiden som har g√•tt)
+              const percentageOfTotal =
+                totalPossibleSeconds > 0
+                  ? Math.round((playerTime / totalPossibleSeconds) * 100)
+                  : 0;
+
+              // Sjekk om spilleren er p√• banen
+              const isOnField = activePlayers.some((p) => p.id === player.id);
+
+              return (
+                <div
+                  key={player.id}
+                  className={`p-2 rounded-lg ${
+                    isOnField ? "bg-green-50" : "bg-gray-50"
+                  }`}
+                >
+                  <div className="flex justify-between">
+                    <div className="font-medium">
+                      #{player.number} {player.name}
+                    </div>
+                    <div className="text-sm text-gray-600">
+                      {formatTime(playerTime)}
+                    </div>
+                  </div>
+                  <div className="w-full bg-gray-200 rounded-full h-2.5 mt-1">
+                    <div
+                      className={`h-2.5 rounded-full ${
+                        isOnField ? "bg-green-600" : "bg-blue-600"
+                      }`}
+                      style={{ width: `${percentage}%` }}
+                    ></div>
+                  </div>
+                  <div className="flex justify-between text-xs text-gray-500 mt-0.5">
+                    <span>Av spilt tid: {percentage}%</span>
+                    <span>Av hele kampen: {percentageOfTotal}%</span>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // Standardvisning (skulle ikke skje)
+  return (
+    <div className="min-h-screen bg-green-50 p-4 flex items-center justify-center">
+      <button
+        onClick={() => setCurrentView("welcome")}
+        className="px-6 py-3 bg-green-600 text-white rounded-lg hover:bg-green-700 font-semibold"
+      >
+        G√• til forsiden
+      </button>
+    </div>
+  );
+};
+
+export default FotballApp;
